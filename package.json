@@ -1,0 +1,26 @@
+{
+  "name": "sanidi",
+  "version": "1.0.0",
+  "description": "Professional love message generator created for Sanidi - customizable romantic templates with analytics",
+  "main": "index.js",
+  "keywords": [
+    "love",
+    "messages", 
+    "generator",
+    "romance",
+    "dating",
+    "valentine",
+    "personalized",
+    "sanidi",
+    "romantic-messages"
+  ],
+  "author": "Binidu Ranasinghe <rbinidu@gmail.com>",
+  "license": "MIT",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "engines": {
+    "node": ">=12.0.0"
+  },
+  "type": "commonjs"
+}
