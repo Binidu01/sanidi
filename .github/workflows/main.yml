@@ -1,404 +1,165 @@
-name: 🚀 Release & Publish to NPM
+name: 📦 Release & Publish Sanidi
 
 on:
   push:
     branches:
       - main
-    paths:
-      - 'package.json'
   workflow_dispatch:
 
 permissions:
   contents: write
   packages: write
-  id-token: write
+  deployments: write
 
 jobs:
-  # ===== JOB 1: SETUP & VALIDATION =====
+
   setup:
+    name: 🧱 Setup Environment
     runs-on: ubuntu-latest
-    name: 🔍 Validate & Setup
     outputs:
-      version: ${{ steps.version.outputs.VERSION }}
+      version: ${{ steps.version.outputs.version }}
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Determine version
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: "https://registry.npmjs.org/"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Read version
         id: version
         run: |
-          VERSION=$(npm pkg get version | tr -d '"')
-          
-          if [[ ! $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "❌ Invalid version format: $VERSION"
-            echo "Use semantic versioning in package.json: 1.0.0"
-            exit 1
-          fi
-          
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-          echo "✅ Version from package.json: $VERSION"
-      
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-          cache: 'npm'
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version from package.json: $VERSION"
 
-      - name: Check if tag exists
-        id: tag_check
-        run: |
-          VERSION=${{ steps.version.outputs.VERSION }}
-          if git rev-parse "v${VERSION}" >/dev/null 2>&1; then
-            echo "TAG_EXISTS=true" >> $GITHUB_OUTPUT
-            echo "⚠️ Tag v${VERSION} already exists"
-          else
-            echo "TAG_EXISTS=false" >> $GITHUB_OUTPUT
-            echo "✅ Tag v${VERSION} does not exist - will create"
-          fi
-
-      - name: Create git tag
-        if: steps.tag_check.outputs.TAG_EXISTS == 'false'
-        run: |
-          VERSION=${{ steps.version.outputs.VERSION }}
-          git config user.email "github-actions@github.com"
-          git config user.name "GitHub Actions"
-          git tag -a v${VERSION} -m "Release v${VERSION}"
-          git push origin v${VERSION}
-          echo "✅ Tag v${VERSION} created and pushed"
-
-  # ===== JOB 2: BUILD & TEST =====
   build:
-    runs-on: ubuntu-latest
-    name: 🏗️ Build & Test
+    name: 🏗️ Build Package
     needs: setup
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-          cache: 'npm'
-
-      - name: Install dependencies
+      - name: Install deps
         run: npm ci
 
-      - name: Run linter
-        run: npm run lint --if-present || echo "⚠️ No lint script"
+      - name: Build
+        run: npm run build --if-present
 
-      - name: Run tests
-        run: npm test || echo "⚠️ No test script"
+      - name: Pack tarball
+        run: npm pack
 
-      - name: Build package
-        run: npm run build --if-present || echo "⚠️ No build script"
-
-      - name: Create package archive
-        run: |
-          npm pack
-          ls -lah sanidi-*.tgz
-          echo "✅ Package created successfully"
-
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-artifact
-          path: sanidi-*.tgz
-          retention-days: 30
-
-  # ===== JOB 3: CREATE GITHUB RELEASE =====
   create-release:
-    runs-on: ubuntu-latest
-    name: 📦 Create GitHub Release
+    name: 🏷️ Create GitHub Release
     needs: [setup, build]
+    runs-on: ubuntu-latest
     outputs:
-      release_id: ${{ steps.create_release.outputs.id }}
-      release_url: ${{ steps.create_release.outputs.html_url }}
+      upload_url: ${{ steps.release.outputs.upload_url }}
+
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - uses: actions/checkout@v4
 
-      - name: Generate changelog
-        id: changelog
-        run: |
-          VERSION=${{ needs.setup.outputs.version }}
-          echo "Extracting changelog for v$VERSION"
-          
-          if [ -f CHANGELOG.md ]; then
-            awk "/^## \[${VERSION}\]/,/^## \[/ {print}" CHANGELOG.md | head -n -1 > release_notes.md
-          fi
-          
-          if [ ! -s release_notes.md ]; then
-            cat > release_notes.md << EOF
-          ## v$VERSION Release
-          
-          ### 🎉 What's New
-          - Enhanced performance
-          - Bug fixes and improvements
-          - Better reliability
-          - AI-powered features
-          - Multi-language support
-          - Enterprise-grade analytics
-          
-          ### 📦 Installation
-          \`\`\`bash
-          npm install sanidi@$VERSION
-          \`\`\`
-          
-          ### 📚 Documentation
-          See [README.md](https://github.com/Binidu01/sanidi#readme) for full documentation.
-          
-          ### 🔗 Links
-          - [NPM Package](https://www.npmjs.com/package/sanidi)
-          - [GitHub Repository](https://github.com/Binidu01/sanidi)
-          - [Issues](https://github.com/Binidu01/sanidi/issues)
-          EOF
-          fi
-          
-          cat release_notes.md
-
-      - name: Create GitHub Release
-        id: create_release
-        uses: ncipollo/release-action@v1
+      - name: Create Release
+        id: release
+        uses: actions/create-release@v1
         with:
-          tag: v${{ needs.setup.outputs.version }}
-          name: 🎉 Sanidi v${{ needs.setup.outputs.version }}
-          bodyFile: release_notes.md
+          tag_name: v${{ needs.setup.outputs.version }}
+          release_name: Sanidi v${{ needs.setup.outputs.version }}
+          body: |
+            🚀 **Sanidi v${{ needs.setup.outputs.version }} released**
+            - Automated CI release
+            - Published to npm
           draft: false
           prerelease: false
-          makeLatest: true
-          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Print release info
-        run: |
-          echo "✅ GitHub Release created!"
-          echo "Release ID: ${{ steps.create_release.outputs.id }}"
-          echo "Release URL: ${{ steps.create_release.outputs.html_url }}"
+      - name: Upload tarball
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.release.outputs.upload_url }}
+          asset_path: ./sanidi-${{ needs.setup.outputs.version }}.tgz
+          asset_name: sanidi-${{ needs.setup.outputs.version }}.tgz
+          asset_content_type: application/gzip
 
-  # ===== JOB 4: PUBLISH TO NPM & GITHUB PACKAGES =====
   publish:
+    name: 📤 Publish to npm
+    needs: [setup, build]
     runs-on: ubuntu-latest
-    name: 📦 Publish to NPM & GitHub Packages
-    needs: [setup, build, create-release]
-    if: success()
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    environment: production
 
-      - name: Setup Node.js
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
-          cache: 'npm'
+          node-version: 20
+          registry-url: "https://registry.npmjs.org/"
 
-      - name: Install dependencies
+      - name: Install deps
         run: npm ci
 
-      - name: Display npm config
-        run: |
-          echo "Node: $(node --version)"
-          echo "NPM: $(npm --version)"
-
-      # ===== PUBLISH TO NPM REGISTRY =====
-      - name: 📦 Publish to NPM Registry
+      - name: Publish
         run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: ✅ Verify NPM publication
-        run: |
-          sleep 10
-          VERSION=${{ needs.setup.outputs.version }}
-          echo "🔍 Verifying NPM publication of sanidi@$VERSION"
-          npm view sanidi@$VERSION
-          echo "✅ Successfully published sanidi@$VERSION to NPM!"
-
-      - name: 🧪 Test NPM installation
-        run: |
-          mkdir test-npm-install
-          cd test-npm-install
-          npm init -y
-          npm install sanidi@${{ needs.setup.outputs.version }}
-          echo "✅ NPM installation test passed!"
-          cd ..
-          rm -rf test-npm-install
-
-      # ===== PUBLISH TO GITHUB PACKAGES =====
-      - name: 🐙 Update package name for GitHub Packages
-        run: npm pkg set name="@Binidu01/sanidi"
-
-      - name: 🐙 Publish to GitHub Packages
-        run: npm publish --registry https://npm.pkg.github.com/
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: ✅ Verify GitHub Packages publication
-        run: |
-          sleep 10
-          VERSION=${{ needs.setup.outputs.version }}
-          echo "🔍 Verifying @Binidu01/sanidi@$VERSION on GitHub Packages"
-          npm view @Binidu01/sanidi@$VERSION --registry https://npm.pkg.github.com/ || echo "⚠️ Package appearing..."
-          echo "✅ Published to GitHub Packages!"
-
-      - name: 🧪 Test GitHub Packages installation
-        run: |
-          mkdir test-github-install
-          cd test-github-install
-          npm init -y
-          npm install @Binidu01/sanidi@${{ needs.setup.outputs.version }} --registry https://npm.pkg.github.com/
-          echo "✅ GitHub Packages installation test passed!"
-          cd ..
-          rm -rf test-github-install
-
-      - name: 📝 Revert package name
-        run: npm pkg set name="sanidi"
-
-      - name: 📊 Display publication summary
-        run: |
-          VERSION=${{ needs.setup.outputs.version }}
-          cat << EOF
-          
-          🎉 Publication Summary
-          ======================
-          
-          Version: v$VERSION
-          
-          ✅ NPM Registry
-             URL: https://www.npmjs.com/package/sanidi@$VERSION
-             Install: npm install sanidi@$VERSION
-          
-          ✅ GitHub Packages
-             URL: https://github.com/Binidu01/sanidi/packages
-             Install: npm install @Binidu01/sanidi@$VERSION --registry https://npm.pkg.github.com/
-          
-          EOF
-
-  # ===== JOB 5: FINAL VERIFICATION & SUCCESS =====
   verify:
+    name: 🔍 Verify Published Package
+    needs: publish
     runs-on: ubuntu-latest
-    name: ✅ Final Verification
-    needs: [setup, publish, create-release]
-    if: success()
+
     steps:
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Wait for NPM propagation
+        run: sleep 10
+
+      - name: Verify version availability
+        run: |
+          PUBLISHED=$(npm info sanidi version)
+          EXPECTED=${{ needs.setup.outputs.version }}
+          if [ "$PUBLISHED" != "$EXPECTED" ]; then
+            echo "Published version mismatch! Expected $EXPECTED but got $PUBLISHED"
+            exit 1
+          fi
+          echo "Verified: Version $PUBLISHED is live."
+
+  create-deployment:
+    name: 🚀 Register GitHub Deployment
+    needs: [setup, build, create-release, publish, verify]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Create Deployment
+        id: dep
+        uses: actions/github-script@v7
         with:
-          node-version: '18'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const result = await github.rest.repos.createDeployment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: context.sha,
+              environment: "production",
+              auto_merge: false,
+              required_contexts: []
+            });
+            core.setOutput("deployment_id", result.data.id);
 
-      - name: 🔍 Final NPM verification
-        run: |
-          VERSION=${{ needs.setup.outputs.version }}
-          echo "Final check for sanidi@$VERSION on NPM"
-          npm view sanidi@$VERSION
-          echo "✅ NPM publication verified!"
-
-      - name: 🔍 Final GitHub Packages verification
-        run: |
-          VERSION=${{ needs.setup.outputs.version }}
-          echo "Final check for @Binidu01/sanidi@$VERSION on GitHub"
-          npm view @Binidu01/sanidi@$VERSION --registry https://npm.pkg.github.com/ || echo "⚠️ Appearing soon..."
-          echo "✅ GitHub Packages publication verified!"
-
-      - name: 🎉 Success Summary
-        run: |
-          cat << 'EOF'
-          
-          🎉 🎉 🎉 RELEASE SUCCESSFUL! 🎉 🎉 🎉
-          
-          ✅ Sanidi v${{ needs.setup.outputs.version }} Released!
-          
-          📦 Published Packages:
-          
-          1️⃣ NPM Registry
-             Package: sanidi
-             URL: https://www.npmjs.com/package/sanidi@${{ needs.setup.outputs.version }}
-             Install: npm install sanidi@${{ needs.setup.outputs.version }}
-          
-          2️⃣ GitHub Packages
-             Package: @Binidu01/sanidi
-             URL: https://github.com/Binidu01/sanidi/packages
-             Install: npm install @Binidu01/sanidi@${{ needs.setup.outputs.version }} --registry https://npm.pkg.github.com/
-          
-          3️⃣ GitHub Release
-             URL: https://github.com/Binidu01/sanidi/releases/tag/v${{ needs.setup.outputs.version }}
-          
-          🔗 Quick Links:
-          - Main Package: https://www.npmjs.com/package/sanidi
-          - Repository: https://github.com/Binidu01/sanidi
-          - Documentation: https://github.com/Binidu01/sanidi#readme
-          
-          EOF
-
-      - name: 📋 Create GitHub Summary
-        run: |
-          cat >> $GITHUB_STEP_SUMMARY << EOF
-          # 🎉 Release Complete: v${{ needs.setup.outputs.version }}
-          
-          ## Status: ✅ SUCCESS
-          
-          ### 📦 All Packages Published
-          
-          - ✅ [NPM Registry](https://www.npmjs.com/package/sanidi@${{ needs.setup.outputs.version }})
-          - ✅ [GitHub Packages](https://github.com/Binidu01/sanidi/packages)
-          - ✅ [GitHub Release](https://github.com/Binidu01/sanidi/releases/tag/v${{ needs.setup.outputs.version }})
-          
-          ### 📥 Installation Commands
-          
-          **NPM Registry:**
-          \`npm install sanidi@${{ needs.setup.outputs.version }}\`
-          
-          **GitHub Packages:**
-          \`npm install @Binidu01/sanidi@${{ needs.setup.outputs.version }} --registry https://npm.pkg.github.com/\`
-          
-          ### ✅ Jobs Completed
-          - Setup & Validation ✅
-          - Build & Test ✅
-          - Create GitHub Release ✅
-          - Publish to NPM Registry ✅
-          - Publish to GitHub Packages ✅
-          - Final Verification ✅
-          
-          **All systems go! 🚀**
-          EOF
-
-  # ===== JOB 6: FAILURE NOTIFICATION =====
-  failure-notification:
-    runs-on: ubuntu-latest
-    name: ❌ Failure Alert
-    if: failure()
-    steps:
-      - name: ❌ Print failure message
-        run: |
-          cat << 'EOF'
-          
-          ❌ ❌ ❌ RELEASE FAILED ❌ ❌ ❌
-          
-          The release workflow encountered an error.
-          
-          Troubleshooting:
-          
-          1. Check version format (must be: 1.0.3)
-          2. Verify NPM_TOKEN secret exists
-          3. Verify GITHUB_TOKEN is available
-          4. Check build/test logs above
-          5. Ensure package.json is valid JSON
-          
-          Common Issues:
-          - Invalid version format
-          - NPM_TOKEN not configured
-          - Package already published
-          - Tests failing
-          - Build errors
-          
-          Resources:
-          - GitHub Issues: https://github.com/Binidu01/sanidi/issues
-          - NPM Docs: https://docs.npmjs.com/
-          - Workflow Logs: Check Actions tab
-          
-          EOF
-          exit 1
+      - name: Mark Deployment Successful
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            await github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: "${{ steps.dep.outputs.deployment_id }}",
+              state: "success",
+              description: "Sanidi successfully published",
+              environment_url: "https://www.npmjs.com/package/sanidi"
+            });
