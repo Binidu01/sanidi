@@ -1,20 +1,28 @@
-name: Publish to npm
+name: Auto Release & Publish
 
 on:
   push:
-    tags:
-      - 'v*'
+    paths:
+      - ".github/workflows/main.yml"   # Trigger ONLY when this file changes
+    branches:
+      - main
+
+permissions:
+  contents: write   # needed for creating tags & releases
 
 jobs:
-  setup:
+  tag_and_publish:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.get_version.outputs.version }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
 
-      - name: Use Node.js
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -24,46 +32,37 @@ jobs:
         run: |
           VERSION=$(node -p "require('./package.json').version")
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
 
-  publish:
-    needs: setup
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          registry-url: "https://registry.npmjs.org/"
-
-      - name: Authenticate to npm
+      - name: Create git tag
         run: |
-          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git tag v${{ steps.get_version.outputs.version }}
+          git push origin v${{ steps.get_version.outputs.version }}
+
+      - name: Authenticate npm
+        run: echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Install dependencies
         run: npm install
 
-      - name: Fix package.json automatically
-        run: npm pkg fix
-
-      - name: Publish package
+      - name: Publish to npm
         run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   release:
-    needs: [setup, publish]
+    needs: tag_and_publish
     runs-on: ubuntu-latest
+
     steps:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ needs.setup.outputs.version }}
-          name: Sanidi v${{ needs.setup.outputs.version }}
+          tag_name: v${{ needs.tag_and_publish.outputs.version }}
+          name: Sanidi v${{ needs.tag_and_publish.outputs.version }}
           draft: false
           prerelease: false
